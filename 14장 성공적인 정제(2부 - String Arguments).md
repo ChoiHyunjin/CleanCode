@@ -143,3 +143,146 @@ private **abstract** class ArgumentMarshaler {
 	**public abstract void set(String s);**
 }
 ```
+
+추상 메소드 set을 만들었다. 그리고 다음과 같이 BooleanArgumentMarshaller에 구현했다.
+
+```jsx
+private
+
+class BooleanArgumentMarshaler extends ArgumentMarshaler {
+  public void
+
+  set(String
+
+  s
+) {
+  booleanValue = true;
+}
+}
+
+// use
+private
+void setBooleanArg(char
+argChar, boolean
+value
+)
+{
+  booleanArgs.get(argChar).set("true");
+}
+```
+
+set 을 옮겼으니, ArgumentMarshaler.setBoolean 메서드는 제거한다.
+
+참고로 추상 set 함수는 String 인수를 받아들이나, BooleanArgumentMarshaler는 인수를 사용하지 않는다. *(이게 뭔말임?)* 인수는
+STring/IntegerArgumentMarshaler에서 필요하기에 정의했다.
+
+다음으로 get 메서드를 옮겼다. 반환 type은 Boolean이다.
+
+```java
+public boolean getBoolean(char arg){
+    Args.ArgumentMarshaler am=booleanArgs.get(arg);
+    return am!=null&&(Boolean)am.get();
+    }
+
+// 위 코드를 컴파일할 목적으로 get 추가
+private abstract class ArgumentMarshaler { 
+	...
+
+  public Object get() {
+    return null;
+  }
+}
+```
+
+위 코드를 컴파일할 목적으로 get 추가했다. *(????)*
+
+```java
+private abstract class ArgumentMarshaler {
+  protected boolean booleanValue = false; 
+	...
+
+  public abstract Object get();
+}
+
+private class BooleanArgumentMarshaler extends ArgumentMarshaler {
+  public void set(String s) {
+    booleanValue = true;
+  }
+
+  public Object get() {
+    return booleanValue;
+  }
+}
+```
+
+코드는 컴파일됐지만, 테스트는 실패했다. 테스트 통과를 위해 get을 추상 메서드로 만들고 BoolArgumentMarshaler에 get을 추가했다.
+
+```java
+  private void setStringArg(char argChar)throws ArgsException{
+    currentArgument++;
+    try{
+    stringArgs.get(argChar).set(args[currentArgument]);
+    }catch(ArrayIndexOutOfBoundsException e){
+    valid=false;
+    errorArgumentId=argChar;
+    errorCode=ErrorCode.MISSING_STRING;
+    throw new ArgsException();
+    }
+    }
+    ...
+public String getString(char arg){
+    Args.ArgumentMarshaler am=stringArgs.get(arg);
+    return am==null?"":(String)am.get();
+    }
+    ...
+
+private abstract class ArgumentMarshaler {
+  private int integerValue;
+
+  public void setInteger(int i) {
+    integerValue = i;
+  }
+
+  public int getInteger() {
+    return integerValue;
+  }
+
+  public abstract void set(String s);
+
+  public abstract Object get();
+}
+
+private class BooleanArgumentMarshaler extends ArgumentMarshaler {
+  private boolean booleanValue = false;
+
+  public void set(String s) {
+    booleanValue = true;
+  }
+
+  public Object get() {
+    return booleanValue;
+  }
+}
+
+private class StringArgumentMarshaler extends ArgumentMarshaler {
+  private String stringValue = "";
+
+  public void set(String s) {
+    stringValue = s;
+  }
+
+  public Object get() {
+    return stringValue;
+  }
+}
+
+private class IntegerArgumentMarshaler extends ArgumentMarshaler {
+  public void set(String s) {
+  }
+
+  public Object get() {
+    return null;
+  }
+}
+}
+```
