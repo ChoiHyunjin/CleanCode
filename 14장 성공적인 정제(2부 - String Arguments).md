@@ -196,44 +196,47 @@ private abstract class ArgumentMarshaler {
 
 위 코드를 컴파일할 목적으로 get 추가했다. *(????)*
 
-```java
-private abstract class ArgumentMarshaler {
-  protected boolean booleanValue = false; 
-	...
-
-  public abstract Object get();
-}
-
-private class BooleanArgumentMarshaler extends ArgumentMarshaler {
-  public void set(String s) {
-    booleanValue = true;
-  }
-
-  public Object get() {
-    return booleanValue;
-  }
-}
-```
-
 코드는 컴파일됐지만, 테스트는 실패했다. 테스트 통과를 위해 get을 추상 메서드로 만들고 BoolArgumentMarshaler에 get을 추가했다.
 
 ```java
-  private void setStringArg(char argChar)throws ArgsException{
+private abstract class ArgumentMarshaler { 
+	protected boolean booleanValue = false; 
+	...
+	public abstract Object get();
+}
+
+private class BooleanArgumentMarshaler extends ArgumentMarshaler { 
+	public void set(String s) {
+		booleanValue = true;
+	}
+
+	public Object get() { 
+		return booleanValue;
+	}
+}
+```
+
+모든 테스트에 만족하는 상태에서, set/get을 BooleanArgumentMarshaler로 이동시켰다. ArgumentMarshaler의 getBoolean 함수를 제거하고, protecte 변수인 booleanValue는 BooleanArgumentMarshaler로 이동시키면서 private으로 선언한다.
+
+String인 경우도 동일한 방식으로 변경한다. get/set을 옮긴 후 사용하지 않는 함수를 제거하고 변수를 옮겼다.
+
+```java
+private void setStringArg(char argChar)throws ArgsException{
     currentArgument++;
     try{
-    stringArgs.get(argChar).set(args[currentArgument]);
+	    stringArgs.get(argChar).set(args[currentArgument]);
     }catch(ArrayIndexOutOfBoundsException e){
-    valid=false;
-    errorArgumentId=argChar;
-    errorCode=ErrorCode.MISSING_STRING;
-    throw new ArgsException();
+	    valid=false;
+	    errorArgumentId=argChar;
+	    errorCode=ErrorCode.MISSING_STRING;
+	    throw new ArgsException();
     }
-    }
+  }
     ...
-public String getString(char arg){
+	public String getString(char arg){
     Args.ArgumentMarshaler am=stringArgs.get(arg);
     return am==null?"":(String)am.get();
-    }
+  }
     ...
 
 private abstract class ArgumentMarshaler {
@@ -284,5 +287,59 @@ private class IntegerArgumentMarshaler extends ArgumentMarshaler {
     return null;
   }
 }
+```
+
+integer인 경우도 같은 과정을 반복한다. integer의 경우에는 parse에서 예외를 던질 수도 있으므로, 구현이 조금 더 복잡하다. 하지만 NumberFormatException이라는 개념이 IntegerArgumentMarshaler에 숨겨지므로 결과는 더 좋았다.
+
+```java
+private boolean isIntArg(char argChar){return intArgs.containsKey(argChar);}
+private void setIntArg(char argChar)throws ArgsException{currentArgument++;
+    String parameter=null;
+    try{
+    parameter=args[currentArgument];
+    intArgs.get(argChar).set(parameter);
+    }catch(ArrayIndexOutOfBoundsException e){
+    valid=false;
+    errorArgumentId=argChar;
+    errorCode=ErrorCode.MISSING_INTEGER;throw new ArgsException();
+    }catch(ArgsException e){
+    valid=false;
+    errorArgumentId=argChar;errorParameter=parameter;
+    errorCode=ErrorCode.INVALID_INTEGER;throw e;
+    }}
+    ...
+private void setBooleanArg(char argChar){
+    try{
+    booleanArgs.get(argChar).set("true");
+    }catch(ArgsException e){
+    }
+    }...
+public int getInt(char arg){
+	Args.ArgumentMarshaler am=intArgs.get(arg);
+	return am==null?0:(Integer)am.get();
+  }...
+
+private abstract class ArgumentMarshaler {
+  public abstract void set(String s) throws ArgsException;
+
+  public abstract Object get();
+} ...
+
+private class IntegerArgumentMarshaler extends ArgumentMarshaler {
+  private int intValue = 0;
+
+  public void set(String s) throws ArgsException {
+    try {
+      intValue = Integer.parseInt(s);
+    } catch (NumberFormatException e) {
+      throw new ArgsException();
+    }
+  }
+
+  public Object get() {
+    return intValue;
+  }
 }
 ```
+
+테스트 코드는 모두 통과했다.
