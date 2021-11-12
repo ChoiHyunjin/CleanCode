@@ -967,11 +967,62 @@ public class Args {
     	}
     }
     private void setStringArg(ArgumentMarshaler m) throws ArgsException {
-    try {
-    m.set(currentArgument.next());
-    } catch (NoSuchElementException e) {
-    errorCode = ErrorCode.MISSING_STRING;
-    throw new ArgsException();
+    	try {
+    		m.set(currentArgument.next());
+    	} catch (NoSuchElementException e) {
+    		errorCode = ErrorCode.MISSING_STRING;
+    		throw new ArgsException();
+    	}
     }
+    ```
+
+- set 함수를 적절한 파생 클래스로 내리기를 위한 선행작업으로 setArgument 수정
+
+    ```java
+    private boolean setArgument(char argChar) throws ArgsException { 
+    	ArgumentMarshaler m = marshalers.get(argChar);
+    	**if (m == null)
+    		return false;** 
+    	try {
+    		if (m instanceof BooleanArgumentMarshaler) setBooleanArg(m);
+    		else if (m instanceof StringArgumentMarshaler) setStringArg(m);
+    		else if (m instanceof IntegerArgumentMarshaler) setIntArg(m);
+    		~~else return false;~~
+    	} catch (ArgsException e) { 
+    		valid = false; 
+    		errorArgumentId = argChar; 
+    		throw e;
+    	}
+    	return true; 
+    }
+    ```
+
+  이 수정은 if-else 체인을 완전히 제거하기 위해서 중요한 사항이다. 그래서 if-else 체인에서 오류 코드를 발생시켰다.
+
+  이제 set 함수를 옮길 수 있다. 사소한 setBooleanArg 부터 준비한다. setBooleanArg함수가 BooleanArgumentMarshaler에 전달하는 것을 목표로 한다.
+
+    ```java
+    private boolean setArgument(char argChar) throws ArgsException { 
+    	ArgumentMarshaler m = marshalers.get(argChar);
+    	if (m == null)
+    		return false; 
+    	try {
+    		if (m instanceof BooleanArgumentMarshaler) 
+    			setBooleanArg(m, **currentArgument**);
+    		else if (m instanceof StringArgumentMarshaler) setStringArg(m);
+    		else if (m instanceof IntegerArgumentMarshaler) setIntArg(m);
+    	} catch (ArgsException e) { 
+    		valid = false; 
+    		errorArgumentId = argChar; 
+    		throw e;
+    	}
+    	return true; 
+    }
+    ---
+    private void setBooleanArg(ArgumentMarshaler m, **Iterator<String> currentArgument**)
+    throws ArgsException {
+      ~~try {~~
+    		m.set("true");
+    	~~} catch (ArgsException e) { }~~
     }
     ```
