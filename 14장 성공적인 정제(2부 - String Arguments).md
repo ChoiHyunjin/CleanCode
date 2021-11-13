@@ -1026,3 +1026,829 @@ public class Args {
     	~~} catch (ArgsException e) { }~~
     }
     ```
+
+  리팩토링 과정에서 try-catch가 제거됐다.
+
+  setBooleanArg에서 Iterator를 사용하지 않음에도 추가한 이유는 ArgumentMarshaler의 추상 메서드로, setIntArg, setStringArg에서 필요하기 때문이다.
+
+  setBooleanArg함수가 더이상 필요 없어졌다. ArgumentMarshaler에 set 함수를 추가하여 직접 호출하자.
+
+    ```java
+    private abstract class ArgumentMarshaler {
+    	public abstract void set(Iterator<String> currentArgument) throws ArgsException;
+    	public abstract void set(String s) throws ArgsException;
+    	public abstract Object get(); 
+    	}
+    	
+    	// ...
+    	
+    private class BooleanArgumentMarshaler extends ArgumentMarshaler { 
+    	private boolean booleanValue = false;
+    	public void set(Iterator<String> currentArgument) throws ArgsException { 
+    		booleanValue = true;
+    	}
+    	public void set(String s) {
+    		~~booleanValue = true;~~
+    	}
+    	public Object get() { 
+    		return booleanValue;
+    	} 
+    }
+    private class StringArgumentMarshaler extends ArgumentMarshaler { 
+    	private String stringValue = "";
+    	public void set(Iterator<String> currentArgument) throws ArgsException { }
+    	public void set(String s) { 
+    		stringValue = s;
+    	}
+    	public Object get() { 
+    		return stringValue;
+    	} 
+    }
+    private class IntegerArgumentMarshaler extends ArgumentMarshaler { 
+    	private int intValue = 0;
+    	public void set(Iterator<String> currentArgument) throws ArgsException { }
+    	public void set(String s) throws ArgsException { 
+    		try {
+    			intValue = Integer.parseInt(s); 
+    		} 
+    		catch (NumberFormatException e) {
+    			throw new ArgsException(); 
+    		}
+    	}
+    	public Object get() { 
+    		return intValue;
+    	} 
+    }
+    ```
+
+  이후 setBooleanArg를 제거
+
+    ```java
+    private boolean setArgument(char argChar) throws ArgsException {
+      ArgumentMarshaler m = marshalers.get(argChar);
+      if (m == null)
+        return false;
+      try {
+        if (m instanceof BooleanArgumentMarshaler) m.set(currentArgument);
+        else if (m instanceof StringArgumentMarshaler) setStringArg(m);
+        else if (m instanceof IntegerArgumentMarshaler) setIntArg(m);
+      } catch (ArgsException e) {
+        valid = false;
+        errorArgumentId = argChar;
+        throw e;
+      }
+      return true;
+    }
+    ```
+
+  모든 테스트를 통과했다. set 함수는 BooleanArgumentMarshaler로 들어갔다.
+
+    - String과 Integer 인수도 변경해준다.
+
+        ```java
+        private boolean setArgument(char argChar) throws ArgsException {
+          ArgumentMarshaler m = marshalers.get(argChar);
+          if (m == null)
+            return false;
+          try {
+            if (m instanceof BooleanArgumentMarshaler) m.set(currentArgument);
+            else if (m instanceof StringArgumentMarshaler)
+              m.set(currentArgument);
+            else if (m instanceof IntegerArgumentMarshaler)
+              m.set(currentArgument);
+          } catch (ArgsException e) {
+            valid = false;
+            errorArgumentId = argChar;
+            throw e;
+          }
+          return true;
+        }
+        
+        //---
+        private class StringArgumentMarshaler extends ArgumentMarshaler {
+          private String stringValue = "";
+        
+          public void set(Iterator<String> currentArgument) throws ArgsException {
+            try {
+              stringValue = currentArgument.next();
+            } catch (NoSuchElementException e) {
+              errorCode = ErrorCode.MISSING_STRING;
+              throw new ArgsException();
+            }
+          }
+        
+          public void set(String s) {
+          }
+        
+          public Object get() {
+            return stringValue;
+          }
+        }
+        
+        private class IntegerArgumentMarshaler extends ArgumentMarshaler {
+          private int intValue = 0;
+        
+          public void set(Iterator<String> currentArgument) throws ArgsException {
+            String parameter = null;
+            try {
+              parameter = currentArgument.next();
+              set(parameter);
+            } catch (NoSuchElementException e) {
+              errorCode = ErrorCode.MISSING_INTEGER;
+              throw new ArgsException();
+            } catch (ArgsException e) {
+              errorParameter = parameter;
+              errorCode = ErrorCode.INVALID_INTEGER;
+              throw e;
+            }
+          }
+        
+        	public void set(String s) throws ArgsException {
+        	  try {
+        	    intValue = Integer.parseInt(s);
+        	  } catch (NumberFormatException e) {
+        	    throw new ArgsException();
+        	  }
+        	}
+        	
+        	public Object get() {
+        	  return intValue;
+        	}
+        }
+        ```
+
+
+    이제 인수 유형을 일일이 확인하던 코드도 제거한다.
+    
+    ```java
+    private boolean setArgument(char argChar) throws ArgsException {
+      ArgumentMarshaler m = marshalers.get(argChar);
+      if (m == null)
+        return false;
+      try {
+        m.set(currentArgument);
+        return true;
+      } catch (ArgsException e) {
+        valid = false;
+        errorArgumentId = argChar;
+        throw e;
+      }
+    }
+    ```
+    
+    IntegerArgumentMarshaler 안을 정리하자.
+    
+    ```jsx
+    private class IntegerArgumentMarshaler extends ArgumentMarshaler {
+    	private int intValue = 0
+    	public void set(Iterator<String> currentArgument) throws ArgsException {
+    		String parameter = null;
+    		try {
+    			parameter = currentArgument.next();
+    			intValue = Integer.parseInt(parameter);
+    		} catch (NoSuchElementException e) {
+    			errorCode = ErrorCode.MISSING_INTEGER;
+    			throw new ArgsException();
+    		} catch (NumberFormatException e) {
+    			errorParameter = parameter;
+    			errorCode = ErrorCode.INVALID_INTEGER;
+    			throw new ArgsException();
+    		}
+    	}
+    	public Object get() {
+    		return intValue;
+    	}
+    }
+    ```
+    
+    ArgumentMarshaler를 인터페이스로 변경한다.
+    
+    ```jsx
+    private interface ArgumentMarshaler {
+    	void set(Iterator<String> currentArgument) throws ArgsException;
+    	Object get();
+    }
+    ```
+    
+    새로운 인수 유형을 넣기 쉬운 구조로 변경되었다. 새로운 것을 넣기에 아주 약간의 변화만이 필요하며, 이 변화들은 독립적이다. double 유형으로 확인해보자.
+    
+    ```jsx
+    public void testSimpleDoublePresent() throws Exception {
+    	Args args = new Args("x##", new String[] {"-x","42.3"});
+    	assertTrue(args.isValid());
+    	assertEquals(1, args.cardinality());
+    	assertTrue(args.has('x'));
+    	assertEquals(42.3, args.getDouble('x'), .001);
+    }
+    ```
+    
+    스키마 파싱 코드를 정리하고, double 인수 타입을 위한 ## 발견 로직을 추가하자.
+    
+    ```jsx
+    private void parseSchemaElement(String element) throws ParseException {
+    	char elementId = element.charAt(0);
+    	String elementTail = element.substring(1);
+    	validateSchemaElementId(elementId);
+    	if (elementTail.length() == 0)
+    		marshalers.put(elementId, new BooleanArgumentMarshaler());
+    	else if (elementTail.equals("*"))
+    		marshalers.put(elementId, new StringArgumentMarshaler());
+    	else if (elementTail.equals("#"))
+    		marshalers.put(elementId, new IntegerArgumentMarshaler());
+    	else if (elementTail.equals("##"))
+    		marshalers.put(elementId, new DoubleArgumentMarshaler());
+    	else
+    		throw new ParseException(String.format(
+    			"Argument: %c has invalid format: %s.", elementId, elementTail), 0);
+    }
+    ```
+    
+    그리고 DoubleArgumentMarshaler 클래스를 추가한다.
+    
+    ```java
+    private class DoubleArgumentMarshaler implements ArgumentMarshaler {
+    	private double doubleValue = 0;
+    	public void set(Iterator<String> currentArgument) throws ArgsException {
+    		String parameter = null;
+    		try {
+    			parameter = currentArgument.next();
+    			doubleValue = Double.parseDouble(parameter);
+    		} catch (NoSuchElementException e) {
+    			errorCode = ErrorCode.MISSING_DOUBLE;
+    			throw new ArgsException();
+    		} catch (NumberFormatException e) {
+    			errorParameter = parameter;
+    			errorCode = ErrorCode.INVALID_DOUBLE;
+    			throw new ArgsException();
+    		}
+    	}
+    	public Object get() {
+    		return doubleValue;
+    	}
+    }
+    
+    // error enum
+    private enum ErrorCode {
+    	OK, MISSING_STRING, MISSING_INTEGER, INVALID_INTEGER, UNEXPECTED_ARGUMENT, 
+    	MISSING_DOUBLE, INVALID_DOUBLE
+    }
+    
+    // getDouble function
+    public double getDouble(char arg) {
+    	Args.ArgumentMarshaler am = marshalers.get(arg);
+    	try {
+    		return am == null ? 0 : (Double) am.get();
+    	} catch (Exception e) {
+    		return 0.0;
+    	}
+    }
+    ```
+    
+    손쉽게 모든 테스트가 통과한다. 다음 테스트 케스로 에러 처리가 올바른지 확인하자. 
+    
+    ```java
+    // 구문분석이 불가능한 string을 double 인수에 전달한다.
+    public void testInvalidDouble() throws Exception {
+    	Args args = new Args("x##", new String[] {"-x","Forty two"});
+    	assertFalse(args.isValid());
+    	assertEquals(0, args.cardinality());
+    	assertFalse(args.has('x'));
+    	assertEquals(0, args.getInt('x'));
+    	assertEquals("Argument -x expects a double but was 'Forty two'.", 
+    	args.errorMessage());
+    }
+    	---
+    public String errorMessage() throws Exception {
+    	switch (errorCode) {
+    		//...
+    		case INVALID_DOUBLE:
+    			return String.format("Argument -%c expects a double but was '%s'.",
+    				errorArgumentId, errorParameter);
+    		case MISSING_DOUBLE:
+    			return String.format("Could not find double parameter for -%c.", 
+    				errorArgumentId);
+    	}
+    	return "";
+    }
+    
+    // 다음은 double 인수를 빠뜨린 경우다.
+    public void testMissingDouble() throws Exception {
+    	Args args = new Args("x##", new String[]{"-x"});
+    	assertFalse(args.isValid());
+    	assertEquals(0, args.cardinality());
+    	assertFalse(args.has('x'));
+    	assertEquals(0.0, args.getDouble('x'), 0.01);
+    	assertEquals("Could not find double parameter for -x.", 
+    	args.errorMessage());
+    }
+    ```
+    
+    예외 코드는 보기 싫고 Args 클래스에 속하지 않는다. 게다가 ParseException을 던지지만 ParseException도 Args 클래스에 속하지 않는다. 이들을 모아 ArgsException 클래스로 이동시킨다.
+    
+    ```java
+    public class ArgsException extends Exception {
+        private char errorArgumentId = '\0';
+        private String errorParameter = "TILT";
+        private ErrorCode errorCode = ErrorCode.OK;
+        public ArgsException() {}
+        public ArgsException(String message) {super(message);}
+        public enum ErrorCode {
+          OK, MISSING_STRING, MISSING_INTEGER, INVALID_INTEGER, UNEXPECTED_ARGUMENT,
+          MISSING_DOUBLE, INVALID_DOUBLE}
+      }
+    ---
+      public class Args {
+     ...
+        private char errorArgumentId = '\0';
+        private String errorParameter = "TILT";
+        private ArgsException.ErrorCode errorCode = ArgsException.ErrorCode.OK;
+        private List<String> argsList;
+        public Args(String schema, String[] args) throws ArgsException {
+          this.schema = schema;
+          argsList = Arrays.asList(args);
+          valid = parse();
+        }
+        private boolean parse() throws ArgsException {
+          if (schema.length() == 0 && argsList.size() == 0)
+            return true;
+          parseSchema();
+          try {
+            parseArguments();
+          } catch (ArgsException e) {
+          }
+          return valid;
+        }
+        private boolean parseSchema() throws ArgsException { ...
+        }
+        private void parseSchemaElement(String element) throws ArgsException { ...
+     else
+          throw new ArgsException(
+              String.format("Argument: %c has invalid format: %s.",
+                  elementId,elementTail));
+        }
+        private void validateSchemaElementId(char elementId) throws ArgsException {
+          if (!Character.isLetter(elementId)) {
+            throw new ArgsException(
+                "Bad character:" + elementId + "in Args format: " + schema);
+          }
+        }
+     ...
+        private void parseElement(char argChar) throws ArgsException {
+          if (setArgument(argChar))
+            argsFound.add(argChar);
+          else {
+            unexpectedArguments.add(argChar);
+            errorCode = ArgsException.ErrorCode.UNEXPECTED_ARGUMENT;
+            valid = false;
+          }
+        }
+     ...
+        private class StringArgumentMarshaler implements ArgumentMarshaler {
+          private String stringValue = "";
+          public void set(Iterator<String> currentArgument) throws ArgsException {
+            try {
+              stringValue = currentArgument.next();
+            } catch (NoSuchElementException e) {
+              errorCode = ArgsException.ErrorCode.MISSING_STRING;
+              throw new ArgsException();
+            }
+          }
+          public Object get() {
+            return stringValue;
+          }
+        }
+        private class IntegerArgumentMarshaler implements ArgumentMarshaler {
+          private int intValue = 0;
+          public void set(Iterator<String> currentArgument) throws ArgsException {
+            String parameter = null;
+            try {
+              parameter = currentArgument.next();
+              intValue = Integer.parseInt(parameter);
+            } catch (NoSuchElementException e) {
+              errorCode = ArgsException.ErrorCode.MISSING_INTEGER;
+              throw new ArgsException();
+            } catch (NumberFormatException e) {
+              errorParameter = parameter;
+              errorCode = ArgsException.ErrorCode.INVALID_INTEGER;
+              throw new ArgsException();
+            }
+          }
+          public Object get() {
+            return intValue;
+          }
+        }
+        private class DoubleArgumentMarshaler implements ArgumentMarshaler {
+          private double doubleValue = 0;
+          public void set(Iterator<String> currentArgument) throws ArgsException {
+            String parameter = null;
+            try {
+              parameter = currentArgument.next();
+              doubleValue = Double.parseDouble(parameter);
+            } catch (NoSuchElementException e) {
+              errorCode = ArgsException.ErrorCode.MISSING_DOUBLE;
+              throw new ArgsException();
+            } catch (NumberFormatException e) {
+              errorParameter = parameter;
+              errorCode = ArgsException.ErrorCode.INVALID_DOUBLE;
+              throw new ArgsException();
+            }
+          }
+          public Object get() {
+            return doubleValue;
+          }
+        }
+      }
+    ```
+    
+    이제 Args 클래스가 던지는 예외는 ArgsException 뿐이다. ArgException을 독자 모듈로 만들어 잡다한 오류 지원 코드를 옮겨올 수 있다. 그리고 Args의 확장도 쉬워진다.
+
+
+## 최종
+
+- ArgsTest.java
+
+    ```java
+    public class ArgsTest extends TestCase {
+        public void testCreateWithNoSchemaOrArguments() throws Exception {
+          Args args = new Args("", new String[0]);
+          assertEquals(0, args.cardinality());
+        }
+        public void testWithNoSchemaButWithOneArgument() throws Exception {
+          try {
+            new Args("", new String[]{"-x"});
+            fail();
+          } catch (ArgsException e) {
+            assertEquals(ArgsException.ErrorCode.UNEXPECTED_ARGUMENT,
+                e.getErrorCode());
+            assertEquals('x', e.getErrorArgumentId());
+          }
+        }
+        public void testWithNoSchemaButWithMultipleArguments() throws Exception {
+          try {
+            new Args("", new String[]{"-x", "-y"});
+            fail();
+          } catch (ArgsException e) {
+            assertEquals(ArgsException.ErrorCode.UNEXPECTED_ARGUMENT,
+                e.getErrorCode());
+            assertEquals('x', e.getErrorArgumentId());
+          }
+        }
+        public void testNonLetterSchema() throws Exception {
+          try {
+            new Args("*", new String[]{});
+            fail("Args constructor should have thrown exception");
+          } catch (ArgsException e) {
+            assertEquals(ArgsException.ErrorCode.INVALID_ARGUMENT_NAME,
+                e.getErrorCode());
+            assertEquals('*', e.getErrorArgumentId());
+          }
+        }
+        public void testInvalidArgumentFormat() throws Exception {
+          try {
+            new Args("f~", new String[]{});
+            fail("Args constructor should have throws exception");
+          } catch (ArgsException e) {
+            assertEquals(ArgsException.ErrorCode.INVALID_FORMAT, e.getErrorCode());
+            assertEquals('f', e.getErrorArgumentId());
+          }
+        }
+        public void testSimpleBooleanPresent() throws Exception {
+          Args args = new Args("x", new String[]{"-x"});
+          assertEquals(1, args.cardinality());
+          assertEquals(true, args.getBoolean('x'));
+        }
+        public void testSimpleStringPresent() throws Exception {
+          Args args = new Args("x*", new String[]{"-x", "param"});
+          assertEquals(1, args.cardinality());
+          assertTrue(args.has('x'));
+          assertEquals("param", args.getString('x'));
+        }
+        public void testMissingStringArgument() throws Exception {
+          try {
+            new Args("x*", new String[]{"-x"});
+            fail();
+          } catch (ArgsException e) {
+            assertEquals(ArgsException.ErrorCode.MISSING_STRING, e.getErrorCode());
+            assertEquals('x', e.getErrorArgumentId());
+          }
+        }
+        public void testSpacesInFormat() throws Exception {
+          Args args = new Args("x, y", new String[]{"-xy"});
+          assertEquals(2, args.cardinality());
+          assertTrue(args.has('x'));
+          assertTrue(args.has('y'));
+        }
+        public void testSimpleIntPresent() throws Exception {
+          Args args = new Args("x#", new String[]{"-x", "42"});
+          assertEquals(1, args.cardinality());
+          assertTrue(args.has('x'));
+          assertEquals(42, args.getInt('x'));
+        }
+        public void testInvalidInteger() throws Exception {
+          try {
+            new Args("x#", new String[]{"-x", "Forty two"});
+            fail();
+          } catch (ArgsException e) {
+            assertEquals(ArgsException.ErrorCode.INVALID_INTEGER, e.getErrorCode());
+            assertEquals('x', e.getErrorArgumentId());
+            assertEquals("Forty two", e.getErrorParameter());
+          }
+        }
+        public void testMissingInteger() throws Exception {
+          try {
+            new Args("x#", new String[]{"-x"});
+            fail();
+          } catch (ArgsException e) {
+            assertEquals(ArgsException.ErrorCode.MISSING_INTEGER, e.getErrorCode());
+            assertEquals('x', e.getErrorArgumentId());
+          }
+        }
+        public void testSimpleDoublePresent() throws Exception {
+          Args args = new Args("x##", new String[]{"-x", "42.3"});
+          assertEquals(1, args.cardinality());
+          assertTrue(args.has('x'));
+          assertEquals(42.3, args.getDouble('x'), .001);
+        }
+        public void testInvalidDouble() throws Exception {
+          try {
+            new Args("x##", new String[]{"-x", "Forty two"});
+            fail();
+          } catch (ArgsException e) {
+            assertEquals(ArgsException.ErrorCode.INVALID_DOUBLE, e.getErrorCode());
+            assertEquals('x', e.getErrorArgumentId());
+            assertEquals("Forty two", e.getErrorParameter());
+          }
+        }
+        public void testMissingDouble() throws Exception {
+          try {
+            new Args("x##", new String[]{"-x"});
+            fail();
+          } catch (ArgsException e) {
+            assertEquals(ArgsException.ErrorCode.MISSING_DOUBLE, e.getErrorCode());
+            assertEquals('x', e.getErrorArgumentId());
+          }
+        }
+      }
+    ```
+
+- ArgsExceptionTest.java
+
+    ```java
+    public class ArgsExceptionTest extends TestCase {
+        public void testUnexpectedMessage() throws Exception {
+          ArgsException e =new ArgsException(ArgsException.ErrorCode.UNEXPECTED_ARGUMENT,
+              'x', null);
+          assertEquals("Argument -x unexpected.", e.errorMessage());
+        }
+        public void testMissingStringMessage() throws Exception {
+          ArgsException e = new ArgsException(ArgsException.ErrorCode.MISSING_STRING,
+              'x', null);
+          assertEquals("Could not find string parameter for -x.", e.errorMessage());
+        }
+        public void testInvalidIntegerMessage() throws Exception {
+          ArgsException e =
+              new ArgsException(ArgsException.ErrorCode.INVALID_INTEGER,
+                  'x', "Forty two");
+          assertEquals("Argument -x expects an integer but was 'Forty two'.",
+              e.errorMessage());
+        }
+        public void testMissingIntegerMessage() throws Exception {
+          ArgsException e =
+              new ArgsException(ArgsException.ErrorCode.MISSING_INTEGER, 'x', null);
+          assertEquals("Could not find integer parameter for -x.", e.errorMessage());
+        }
+        public void testInvalidDoubleMessage() throws Exception {
+          ArgsException e = new ArgsException(ArgsException.ErrorCode.INVALID_DOUBLE,
+              'x', "Forty two");
+          assertEquals("Argument -x expects a double but was 'Forty two'.",
+              e.errorMessage());
+        }
+        public void testMissingDoubleMessage() throws Exception {
+          ArgsException e = new ArgsException(ArgsException.ErrorCode.MISSING_DOUBLE,
+              'x', null);
+          assertEquals("Could not find double parameter for -x.", e.errorMessage());
+        }
+      }
+    ```
+
+- ArgsException.java
+
+    ```java
+    public class ArgsException extends Exception {
+        private char errorArgumentId = '\0';
+        private String errorParameter = "TILT";
+        private ErrorCode errorCode = ErrorCode.OK;
+        public ArgsException() {}
+        public ArgsException(String message) {super(message);}
+        public ArgsException(ErrorCode errorCode) {
+          this.errorCode = errorCode;
+        }
+        public ArgsException(ErrorCode errorCode, String errorParameter) {
+          this.errorCode = errorCode;
+          this.errorParameter = errorParameter;
+        }
+        public ArgsException(ErrorCode errorCode, char errorArgumentId,
+                             String errorParameter) {
+          this.errorCode = errorCode;
+          this.errorParameter = errorParameter;
+          this.errorArgumentId = errorArgumentId;
+        }
+        public char getErrorArgumentId() {
+          return errorArgumentId;
+        }
+        public void setErrorArgumentId(char errorArgumentId) {
+          this.errorArgumentId = errorArgumentId;
+        }
+        public String getErrorParameter() {
+          return errorParameter;
+        }
+        public void setErrorParameter(String errorParameter) {
+          this.errorParameter = errorParameter;
+        }
+        public ErrorCode getErrorCode() {
+          return errorCode;
+        }
+        public void setErrorCode(ErrorCode errorCode) {
+          this.errorCode = errorCode;
+        }
+        public String errorMessage() throws Exception {
+          switch (errorCode) {
+            case OK:
+              throw new Exception("TILT: Should not get here.");
+            case UNEXPECTED_ARGUMENT:
+              return String.format("Argument -%c unexpected.", errorArgumentId);
+            case MISSING_STRING:
+              return String.format("Could not find string parameter for -%c.",
+                  errorArgumentId);
+            case INVALID_INTEGER:
+              return String.format("Argument -%c expects an integer but was '%s'.",
+                  errorArgumentId, errorParameter);
+            case MISSING_INTEGER:
+              return String.format("Could not find integer parameter for -%c.",
+                  errorArgumentId);
+            case INVALID_DOUBLE:
+              return String.format("Argument -%c expects a double but was '%s'.",
+                  errorArgumentId, errorParameter);
+            case MISSING_DOUBLE:
+              return String.format("Could not find double parameter for -%c.",
+                  errorArgumentId);
+          }
+          return "";
+        }
+        public enum ErrorCode {
+          OK, INVALID_FORMAT, UNEXPECTED_ARGUMENT, INVALID_ARGUMENT_NAME,
+          MISSING_STRING,
+          MISSING_INTEGER, INVALID_INTEGER,
+          MISSING_DOUBLE, INVALID_DOUBLE}
+      }
+    ```
+
+- Args.java
+
+    ```java
+    public class Args {
+        private String schema;
+        private Map<Character, ArgumentMarshaler> marshalers =
+            new HashMap<Character, ArgumentMarshaler>();
+        private Set<Character> argsFound = new HashSet<Character>();
+        private Iterator<String> currentArgument;
+        private List<String> argsList;
+        public Args(String schema, String[] args) throws ArgsException {
+          this.schema = schema;
+          argsList = Arrays.asList(args);
+          parse();
+        }
+        private void parse() throws ArgsException {
+          parseSchema();
+          parseArguments();
+        }
+        private boolean parseSchema() throws ArgsException {
+          for (String element : schema.split(",")) {
+            if (element.length() > 0) {
+              parseSchemaElement(element.trim());
+            }
+          }
+          return true;
+        }
+        private void parseSchemaElement(String element) throws ArgsException {
+          char elementId = element.charAt(0);
+          String elementTail = element.substring(1);
+          validateSchemaElementId(elementId);
+          if (elementTail.length() == 0)
+            marshalers.put(elementId, new BooleanArgumentMarshaler());
+          else if (elementTail.equals("*"))
+            marshalers.put(elementId, new StringArgumentMarshaler());
+          else if (elementTail.equals("#"))
+            marshalers.put(elementId, new IntegerArgumentMarshaler());
+          else if (elementTail.equals("##"))
+            marshalers.put(elementId, new DoubleArgumentMarshaler());
+          else
+            throw new ArgsException(ArgsException.ErrorCode.INVALID_FORMAT,
+                elementId, elementTail);
+        }
+        private void validateSchemaElementId(char elementId) throws ArgsException {
+          if (!Character.isLetter(elementId)) {
+            throw new ArgsException(ArgsException.ErrorCode.INVALID_ARGUMENT_NAME,
+                elementId, null);
+          }
+        }
+        private void parseArguments() throws ArgsException {
+          for (currentArgument = argsList.iterator(); currentArgument.hasNext();) {
+            String arg = currentArgument.next();
+            parseArgument(arg);
+          }
+        }
+        private void parseArgument(String arg) throws ArgsException {
+          if (arg.startsWith("-"))
+            parseElements(arg);
+        }
+        private void parseElements(String arg) throws ArgsException {
+          for (int i = 1; i < arg.length(); i++)
+            parseElement(arg.charAt(i));
+        }
+        private void parseElement(char argChar) throws ArgsException {
+          if (setArgument(argChar))
+            argsFound.add(argChar);
+          else {
+            throw new ArgsException(ArgsException.ErrorCode.UNEXPECTED_ARGUMENT,
+                argChar, null);
+          }
+        }
+        private boolean setArgument(char argChar) throws ArgsException {
+          ArgumentMarshaler m = marshalers.get(argChar);
+          if (m == null)
+            return false;
+          try {
+            m.set(currentArgument);
+            return true;
+          } catch (ArgsException e) {
+            e.setErrorArgumentId(argChar);
+            throw e;
+          }
+        }
+        public int cardinality() {
+          return argsFound.size();
+        }
+        public String usage() {
+          if (schema.length() > 0)
+            return "-[" + schema + "]";
+          else
+            return "";
+        }
+        public boolean getBoolean(char arg) {
+          ArgumentMarshaler am = marshalers.get(arg);
+          boolean b = false;
+          try {
+            b = am != null && (Boolean) am.get();
+          } catch (ClassCastException e) {
+            b = false;
+          }
+          return b;
+        }
+        public String getString(char arg) {
+          ArgumentMarshaler am = marshalers.get(arg);
+          try {
+            return am == null ? "" : (String) am.get();
+          } catch (ClassCastException e) {
+            return "";
+          }
+        }
+        public int getInt(char arg) {
+          ArgumentMarshaler am = marshalers.get(arg);
+          try {
+            return am == null ? 0 : (Integer) am.get();
+          } catch (Exception e) {
+            return 0;
+          }
+        }
+        public double getDouble(char arg) {
+          ArgumentMarshaler am = marshalers.get(arg);
+          try {
+            return am == null ? 0 : (Double) am.get();
+          } catch (Exception e) {
+            return 0.0;
+          }
+        }
+        public boolean has(char arg) {
+          return argsFound.contains(arg);
+        }
+      }
+    ```
+
+- Args 클래스에서는 주로 코드 제거. ArgsException으로 상당량 이동.
+- ArgumentMarshaler 클래스도 각자 파일로 이동.
+
+소프트웨어 설계 품질이 높이기
+
+- 적절하게 코드 분리하기
+- 관심사 분리하기
+
+눈여겨 볼 코드는 ArgsException의 errorMessage 메서드이다. Args에 있던 이 메서드는  SRP 위반. Args가 오류 메시지 형식까지 책임졌기 때문이다. 그치만 ArgsException이 오류 메시지 형식을 처리해야하나? → 이것은 절충안으로, 깔끔하게 만들어진 오류 메시지로 얻는 장점은 무시하기 어렵다. 엄밀하게는 새로운 클래스가 필요하다.
+
+# 결론
+
+그저 돌아가는 코드만으로는 부족하다. 나쁜 코드는 썩어 문드러진다. 점점 속도가 느려진다.
+
+깨끗한 코드로 개선할 수 있지만, 비용이 많이든다.
+
+처음부터 깨끗하게 유지하기가 상대적으로 쉽다.
